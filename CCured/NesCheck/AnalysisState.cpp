@@ -20,13 +20,16 @@ void AnalysisState::RegisterVariable(const VariableMapKeyType *Decl) {
 
     Variables[Decl].classification = VariableStates::Safe;
     Variables[Decl].size = llvm::ConstantInt::get(sizetype, 0);
-    errs() << GREEN << "\t=> Classified " << getIdentifyingName(Decl) << " as SAFE" << NORMAL << "\n";
+    errs() << GREEN << "\t=>(Register) Classified " << getIdentifyingName(Decl) << " as SAFE" << NORMAL << "\n";
 }
 void AnalysisState::ClassifyPointerVariable(const VariableMapKeyType* Decl, VariableStates ptrType) {
     RegisterVariable(Decl);
-
+//    errs()<< GREEN <<"\t=> Current Classification: "<< PtrTypeToString(Variables[Decl].classification) <<"\n";
+//    errs() << GREEN <<"Trying to classsify this to "<<PtrTypeToString(ptrType)<<"\n";
     if (Variables[Decl].classification < ptrType) {
         Variables[Decl].classification = ptrType;
+        if(Variables[Decl].isGlobal)
+            Variables[Decl].didClassificationChange = true;
         errs() << GREEN << "\t=> Classified " << getIdentifyingName(Decl) << " as " << PtrTypeToString(ptrType) << NORMAL << "\n";
     } else {
         errs() << GRAY << "\t=> Ignored classification of " << getIdentifyingName(Decl) << " as " << PtrTypeToString(ptrType) << NORMAL << "\n";
@@ -65,7 +68,10 @@ void AnalysisState::SetHasMetadataTableEntry(const VariableMapKeyType *Ref) {
 VariableInfo * AnalysisState::GetPointerVariableInfo(VariableMapKeyType *Decl) {
     errs() << GRAY << "\tGetting VarInfo for " << getIdentifyingName(Decl) << "... ";
     if (isa<ConstantPointerNull>(Decl)) {
+        errs() << "ConstantPointer NULL type creating new temp variable info.\n" << NORMAL;
         VariableInfo* info = new VariableInfo;
+        //Attempted BUG FIX - ENUM ISSUE ( NEW STRUCT VARIABLE WITH DEFAULT ENUM VALUE WILL APPARENTLY LEAD TO UNDEFINED BEHAVIOUR)
+        info->classification = VariableStates::Unknown;
         info->size = llvm::ConstantInt::get(sizetype, 0);
         return info;
     }
@@ -91,6 +97,7 @@ std::string AnalysisState::GetVariablesStateAsString() {
         if (iter->second.classification == VariableStates::Safe) _safeptrscount++;
         else if (iter->second.classification == VariableStates::Seq) _seqptrscount++;
         else if (iter->second.classification == VariableStates::Dyn) _dynptrscount++;
+
 
         if (iter->second.hasMetadataTableEntry) _hasmetadatatableentrycount++;
     }

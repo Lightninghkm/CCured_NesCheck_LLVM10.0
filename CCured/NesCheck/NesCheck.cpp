@@ -14,20 +14,22 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
-#include "llvm/IR/Intrinsics.h" 
+#include "llvm/IR/Intrinsics.h"
 
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/DebugInfo.h"
 
+#include "llvm/IR/DerivedTypes.h"
 #include "AnalysisState.hpp"
+//#include "neo4j_wrapper.hpp"
 
 #include <list>
 #include <time.h>
 
 using namespace llvm;
 
-#define IS_DEBUGGING 0
+#define IS_DEBUGGING 1
 #define IS_NAIVE 0
 
 #define DEBUG_TYPE "nescheck"
@@ -82,11 +84,11 @@ public:
 
 private:
 
-    Module* CurrentModule;	
+    Module* CurrentModule;
     const DataLayout* CurrentDL;
     ObjectSizeOffsetEvaluator *ObjSizeEval;
     BuilderTy *Builder;
-    
+
     NesCheck::AnalysisState TheState;
     Type* MySizeType;
     ConstantInt* UnknownSizeConstInt;
@@ -94,7 +96,7 @@ private:
     std::vector<std::string> WhitelistedFunctions;
     bool isCurrentFunctionWhitelisted = false; // function excluded from both analysis and instrumentation
     bool isCurrentFunctionWhitelistedForInstrumentation = false; // function excluded from instrumentation but included in analysis
-    
+
     BasicBlock *TrapBB = nullptr;
 
     std::vector<Instruction*> InstrumentationWorkList;
@@ -119,7 +121,6 @@ private:
         return unwrapPointer(innerT->getElementType());
     }
 
-
     Value* lookupMetadataTableEntry(Value* Ptr, Instruction* CurrInst) {
         if (isCurrentFunctionWhitelistedForInstrumentation) {
             errs() << "\tSKIPPING Metadata Table lookup for " << *Ptr << " because of whitelisting\n";
@@ -130,49 +131,39 @@ private:
 
         errs() << "\tInjecting Metadata Table lookup for " << *Ptr << "\n";
         Instruction* ptrcast = (Instruction*)Builder->CreatePtrToInt(Ptr, CurrentDL->getIntPtrType(Ptr->getType()));
-      
+
         ptrcast->removeFromParent();
 
         ptrcast->insertAfter(CurrInst);
-	
-	if (lookupMetadataFunction != NULL){	
-        	CallInst* call = Builder->CreateCall(lookupMetadataFunction, ptrcast);
-		errs() << "\tPtrcast at " << ptrcast << "\n";
-	
-        	call->removeFromParent();
-	
-        	call->insertAfter(ptrcast);
-      
-        	++MetadataTableLookups;
 
+	if (lookupMetadataFunction != NULL){
+        	CallInst* call = Builder->CreateCall(lookupMetadataFunction, ptrcast);
+		    errs() << "\tPtrcast at " << ptrcast << "\n";
+        	call->removeFromParent();
+        	call->insertAfter(ptrcast);
+        	++MetadataTableLookups;
         	TheState.SetSizeForPointerVariable(Ptr, (Value*)call);
         	TheState.SetHasMetadataTableEntry(Ptr);
-
         	return (Value*)call;
 	}
+
 	return 0;
     }
+
     void setMetadataTableEntry(Value* Ptr, Value* Size, Instruction* CurrInst) {
         if (isCurrentFunctionWhitelistedForInstrumentation) {
             errs() << "\tSKIPPING Metadata Table update for " << *Ptr << " because of whitelisting\n";
             return;
         }
-	
         errs() << "\tInjecting Metadata Table update for " << *Ptr << "\n";
-
         Value* P = Builder->CreatePtrToInt(Ptr, CurrentDL->getIntPtrType(Ptr->getType()));
-
         Value* addr = ConstantInt::get(MySizeType, (long)((const void*)CurrInst));
-	if (setMetadataFunction != NULL) {
+	    if (setMetadataFunction != NULL) {
         	Builder->CreateCall(setMetadataFunction, { P, Size, addr });
         	++MetadataTableUpdates;
-
         	TheState.SetHasMetadataTableEntry(Ptr);
-	}
-	
+	    }
     }
-
-
 
     Value* getSizeForValue(Value* v) {
         Value* size = ConstantInt::get(MySizeType, 0);
@@ -213,32 +204,40 @@ private:
     }
 
     Value* getOffsetForGEPInst(GetElementPtrInst* GEPInstr) {
-        // if ObjSizeEval can directly calculate the offset for us, let's use that
-        SizeOffsetEvalType SizeOffset = ObjSizeEval->compute(GEPInstr);
-        if (ObjSizeEval->knownOffset(SizeOffset)) {
-            errs() << "\tUsing Offset from ObjSizeEval = " << *(SizeOffset.second) << "\n";
-            return SizeOffset.second;
-        }
 
-        // else, let's use the GEP functions
-        APInt Off(CurrentDL->getPointerTypeSizeInBits(GEPInstr->getType()), 0);
-        if (GEPInstr->accumulateConstantOffset(*CurrentDL, Off)) {
-            errs() << "\tUsing Offset from GEP.accumulateConstantOffset() = " << Off << "\n";
-            return ConstantInt::get(MySizeType, Off);
-        }
+        // Vector indices are not handled by ObjectOffsetSizeEvaluator (LLVM 6)
+        // TODO - Check if ObjectOffsetInstructionVisitor will work
+        if(!GEPInstr->getType()->isVectorTy()) {
+            // if ObjSizeEval can directly calculate the offset for us, let's use that
+            SizeOffsetEvalType SizeOffset = ObjSizeEval->compute(GEPInstr);
+            if (ObjSizeEval->knownOffset(SizeOffset)) {
+                errs() << "\tUsing Offset from ObjSizeEval = " << *(SizeOffset.second) << "\n";
+                return SizeOffset.second;
+            }
+            // else, let's use the GEP functions
+            APInt Off(CurrentDL->getPointerTypeSizeInBits(GEPInstr->getType()), 0);
+            if (GEPInstr->accumulateConstantOffset(*CurrentDL, Off)) {
+                errs() << "\tUsing Offset from GEP.accumulateConstantOffset() = " << Off << "\n";
+                return ConstantInt::get(MySizeType, Off);
+            }
 
-        // as a last resort, let's infer it manually
-        uint64_t typeStoreSize = CurrentDL->getTypeStoreSize(GEPInstr->getResultElementType());
-        errs() << "\tSize of type of Ptr = " << typeStoreSize << "\n";
-        // Note: the following indexing used to be GEPInstr->getOperand(1), but now it should be more accurate
-        Value* Idx = Builder->CreateIntCast(GEPInstr->getOperand(GEPInstr->getNumIndices()), MySizeType, false);
-        Value* Size = ConstantInt::get(MySizeType/*IntTy*/, typeStoreSize);
-        Value* Offset = Builder->CreateMul(Idx, Size);
-        errs() << "\tUsing Offset from manual evaluation = " << *Offset << "\n";
-        return Offset;
+            // as a last resort, let's infer it manually
+            uint64_t typeStoreSize = CurrentDL->getTypeStoreSize(GEPInstr->getResultElementType());
+            errs() << "\tSize of type of Ptr = " << typeStoreSize << "\n";
+            // Note: the following indexing used to be GEPInstr->getOperand(1), but now it should be more accurate
+            Value *Idx = Builder->CreateIntCast(GEPInstr->getOperand(GEPInstr->getNumIndices()), MySizeType, false);
+            Value *Size = ConstantInt::get(MySizeType/*IntTy*/, typeStoreSize);
+            Value *Offset = Builder->CreateMul(Idx, Size);
+            errs() << "\tUsing Offset from manual evaluation = " << *Offset << "\n";
+            return Offset;
+        }
+        else
+        {
+            // Vector
+            //TODO - Can infer manually mostly
+            return UnknownSizeConstInt;
+        }
     }
-
-
 
     /// getTrapBB - create a basic block that traps. All overflowing conditions
     /// branch to this block. There's only one trap block per function.
@@ -259,7 +258,7 @@ private:
         Value* linenum = ConstantInt::get(MySizeType, ln);
         Builder->CreateCall(MyPrintErrorLineFn, linenum);
         */
-         
+
         llvm::Value *F = Intrinsic::getDeclaration(Fn->getParent(), Intrinsic::trap);
         CallInst *TrapCall = Builder->CreateCall(F);
         TrapCall->setDoesNotReturn();
@@ -271,8 +270,6 @@ private:
         return TrapBB;
     }
 
-
-    
 
     bool instrumentGEP(GetElementPtrInst* GEPInstr) {
         if (isCurrentFunctionWhitelisted || isCurrentFunctionWhitelistedForInstrumentation) {
@@ -353,8 +350,6 @@ private:
 
         OldBB->getTerminator()->eraseFromParent();
 
-
-
         return true;
     }
 
@@ -366,6 +361,31 @@ private:
         char address[11];
         sprintf(address, "%p", (const void*) I);
         errs() << BLUE << "[" << address << "] " << NORMAL;
+
+        for (Use &U : (&*I)->operands()) {
+            if(GlobalVariable * GV = dyn_cast<GlobalVariable>(U)){
+//                errs() << "Global Variable - " << *GV << "\n";
+                TheState.Variables[GV].dependentFunctions.insert(TheState.Variables[GV].dependentFunctions.begin(),(I->getFunction()->getName()));
+            }
+//              For the edge cases where a gep instruction is another instruction's operand
+//              GEP Instruction isn't relevant to definition of a DYN pointer but it is relevant to SEQ
+            else if (GEPOperator* gepo = dyn_cast<GEPOperator>(&U))
+            {
+                if (GlobalVariable* GV = dyn_cast<GlobalVariable>(gepo->getPointerOperand()))
+                {
+                    errs() << "Global Variable - " << *GV << "\n";
+                    TheState.Variables[GV].dependentFunctions.insert(TheState.Variables[GV].dependentFunctions.begin(),(I->getFunction()->getName()));
+                }
+                for (auto it = gepo->idx_begin(), et = gepo->idx_end(); it != et; ++it)
+                {
+                    if (GlobalVariable* GV = dyn_cast<GlobalVariable>(*it))
+                    {
+                        errs() << "Global Variable  - " << *GV <<  "\n";
+                        TheState.Variables[GV].dependentFunctions.insert(TheState.Variables[GV].dependentFunctions.begin(),(I->getFunction()->getName()));
+                    }
+                }
+            }
+        }
 
         if (AllocaInst *II = dyn_cast_or_null<AllocaInst>(I)) {
             bool isArray = II->isArrayAllocation() || II->getType()->getElementType()->isArrayTy();
@@ -383,7 +403,9 @@ private:
                 TheState.SetSizeForPointerVariable(II, totalsize);
             }
 
-        } else if (CallInst *II = dyn_cast_or_null<CallInst>(I)) {
+        }
+
+        else if (CallInst *II = dyn_cast_or_null<CallInst>(I)) {
             if (II->getCalledFunction() != NULL && II->getCalledFunction()->getName() == "malloc" && II->getCalledFunction()->arg_size() == 1) {
                 errs() << "(M) " << *II << "\n";
                 TheState.SetSizeForPointerVariable(II, II->getArgOperand(0));
@@ -421,7 +443,9 @@ private:
             }}
 
 
-        } else if (ReturnInst *RI = dyn_cast_or_null<ReturnInst>(I)) {
+        }
+
+        else if (ReturnInst *RI = dyn_cast_or_null<ReturnInst>(I)) {
             errs() << "(R) " << *RI << "\n";
             if (CONTAINS(FunctionsAddedWithNewReturnType, RI->getParent()->getParent())) {
                 errs() << "Return instruction needs rewriting\n";
@@ -456,7 +480,9 @@ private:
             }}
 
 
-        } else if (StoreInst *II = dyn_cast_or_null<StoreInst>(I)) {
+        }
+
+        else if (StoreInst *II = dyn_cast_or_null<StoreInst>(I)) {
             Value* valoperand = II->getValueOperand();
             // propagate size metadata
             if (!isa<Function>(valoperand))
@@ -479,13 +505,15 @@ private:
 
                         AllocaInst* sizevaralloca;
                         NesCheck::VariableInfo* varinfo2 = TheState.GetPointerVariableInfo(instr);
-                        if (!varinfo2->hasExplicitSizeVariable) {
+                        if ( varinfo2==NULL ||  !varinfo2->hasExplicitSizeVariable) {
                             // create a new explicit size variable for the pointer
                             sizevaralloca = new AllocaInst(MySizeType, 0, instr->getName() + "_size_nesCheck", B->getTerminator());
                             // store initial size value for explicit size variable
-                            new StoreInst(varinfo2->size, sizevaralloca, B->getTerminator());
+                            //Attempted bug fix - is this statement of any use?
+                            if(varinfo2!=NULL)
+                                new StoreInst(varinfo2->size, sizevaralloca, B->getTerminator());
                             TheState.SetExplicitSizeVariableForPointerVariable(instr, sizevaralloca);
-                        } else {
+                        } else if(varinfo2!=NULL) {
                             sizevaralloca = (AllocaInst*)(varinfo2->explicitSizeVariable);
                         }
                         // store new size value for explicit size variable, if this BasicBlock gets executed
@@ -507,14 +535,16 @@ private:
                 }}
 
             }
+        }
 
-
-        } else if (LoadInst *II = dyn_cast_or_null<LoadInst>(I)) {
+        else if (LoadInst *II = dyn_cast_or_null<LoadInst>(I)) {
             // propagate size metadata
             errs() << "(~) " << *II << "\n";
             if (II->getType()->isPointerTy()) {
                 Value* ptroperand = II->getPointerOperand();
                 NesCheck::VariableInfo* varinfo = TheState.GetPointerVariableInfo(ptroperand);
+//                errs()<<"The PTR Operand is: "<<*ptroperand<<" and its classification is : ";
+
 
                 if (!varinfo && isa<Constant>(ptroperand))
                     varinfo = TheState.SetSizeForPointerVariable(ptroperand, getSizeForValue(ptroperand));
@@ -527,12 +557,15 @@ private:
                     TheState.SetSizeForPointerVariable(ptroperand, loadsize);
                     TheState.SetInstantiatedExplicitSizeVariable(ptroperand, true);
                 }
+                errs()  <<PtrTypeToString(varinfo->classification)<<" \n";
                 TheState.ClassifyPointerVariable(II, varinfo->classification);
                 TheState.SetSizeForPointerVariable(II, varinfo->size);
             }}
 
 
-        } else if (GetElementPtrInst *II = dyn_cast_or_null<GetElementPtrInst>(I)) {
+        }
+
+        else if (GetElementPtrInst *II = dyn_cast_or_null<GetElementPtrInst>(I)) {
             Value* Ptr = II->getPointerOperand();
 
             errs() << "(*) " << *II << "\t" << DETAIL << " // {" << *(Ptr) << " (" << *(II->getPointerOperandType()) << ") | " << *(II->getType()) << " -> " << *(II->getResultElementType()) << " }" << NORMAL << "\n";
@@ -574,7 +607,9 @@ private:
             // try to instrument this GEP if needed
             //changed |= instrumentGEP(II);
 
-        } else if (CastInst *II = dyn_cast_or_null<CastInst>(I)) {
+        }
+
+        else if (CastInst *II = dyn_cast_or_null<CastInst>(I)) {
             Type *srcT = II->getSrcTy();
             Type *dstT = II->getDestTy();
             errs() << "(>) " << *II << "\t" << DETAIL << " // { " << *srcT << " " << countIndirections(srcT) << " into " << *dstT << " " << countIndirections(dstT) << " }" << "" << NORMAL << "\n";
@@ -604,7 +639,9 @@ private:
                 }
             }
 
-        } else {
+        }
+
+        else {
             //errs() << "" << RED << "( )" << NORMAL << " " << *I;
             //errs() << "\n";
         }
@@ -647,10 +684,10 @@ private:
 		if (varinfo != NULL)
                 	SpecificNewArgs.push_back(varinfo->size);
             }
-	    errs() << "AI at " << AI << "\n";	
+	    errs() << "AI at " << AI << "\n";
             Args.push_back(*AI);
         }
-	
+
         // Then, insert the new arguments
         for (Value* newspecificarg : SpecificNewArgs) {
             Args.push_back(newspecificarg);
@@ -710,11 +747,12 @@ private:
 
         return false;
     }
+
     bool isWhitelistedForInstrumentation(Function* F) {
         StringRef fname = F->getName();
         std::string fnamestr = fname.str();
         // Whitelist all functions that are only necessary for TOSSIM simulation, or for nesCheck instrumentation.
-        return (isWhitelisted(F) || CONTAINS(WhitelistedFunctions, fname.str()) || 
+        return (isWhitelisted(F) || CONTAINS(WhitelistedFunctions, fname.str()) ||
                 (fname.endswith("_nesCheck") && CONTAINS(WhitelistedFunctions, fname.drop_back(9))));
     }
 
@@ -736,7 +774,7 @@ private:
             errs() << "\n\n*********\n REWRITING SIGNATURE FOR FUNCTION: " << F->getName() << '\n';
             errs() << "SKIPPED function rewriting because of whitelisting\n";
             return F;
-        } 
+        }
 
         // check for pointer parameters and add a respective Size parameter for each
         SmallVector<Argument*, 8> newArgs;
@@ -779,7 +817,7 @@ private:
         llvm::Function *NF = llvm::Function::Create(NFTy, F->getLinkage(), F->getName() + "_nesCheck");
         NF->copyAttributesFrom(F);
         F->getParent()->getFunctionList().insert(F->getIterator(), NF);
-            
+
 
         // moves an iterator to the first extra parameter of this new function
         llvm::Function::arg_iterator NNAI = NF->arg_begin();
@@ -868,6 +906,22 @@ private:
         errs() << "-->) Function signatures rewritten\t\t" << FunctionSignaturesRewritten << "\n";
         errs() << "-->) Function call sites rewritten\t\t" << FunctionCallSitesRewritten << "\n\n";
 
+////        Neo4j_Wrapper::Neo4j_Connector connector;
+////        connector.connect();
+//        std::string instruction_string;
+//        llvm::raw_string_ostream rso(instruction_string);
+//        int i=1;
+//        for(std::map<const llvm::Value*, NesCheck::VariableInfo >::iterator it =TheState.Variables.begin(); it != TheState.Variables.end(); it++)
+//        {
+//            if(it->second.classification == NesCheck::VariableStates::Dyn)
+//            {
+//                rso << *(it->first);
+//                errs()<<i<<". Classified - " << it->first<<" : " << *(it->first) << "RSO: "<< instruction_string <<" as dyn\n\n";
+////                connector.insert_attack_graph_node(Neo4j_Wrapper::AttackState,"Unsafe pointer CCured",rso.str());
+//                instruction_string.clear();
+//                ++i;
+//            }
+//        }
 
         errs() << "\n\n";
     }
@@ -907,10 +961,33 @@ private:
         setMetadataFunction = CurrentModule->getFunction("setMetadataTableEntry");
         lookupMetadataFunction = CurrentModule->getFunction("lookupMetadataTableEntry");
 
+        if(lookupMetadataFunction==NULL) {    //Create function call without linking
+            errs() << "****  lookupMetadataTableEntry not linked ****** "  << '\n';
+
+            lookupMetadataFunction = cast<Function>(CurrentModule->getOrInsertFunction("lookupMetadataTableEntry",
+                    /*ret type*/                           IntegerType::getInt64Ty(CurrentModule->getContext()),
+                    /*args*/                               IntegerType::getInt64Ty(CurrentModule->getContext())));
+
+        }
+
+        if(setMetadataFunction==NULL)
+        {
+            errs() << "****  setMetadataTableEntry not linked ****** "  << '\n';
+
+            //Create function call without linking
+            setMetadataFunction= cast<Function>(CurrentModule->getOrInsertFunction("setMetadataTableEntry",
+                    /*ret type*/                           Type::getVoidTy(CurrentModule->getContext()),
+                    /*args*/                               IntegerType::getInt64Ty(CurrentModule->getContext()),
+                                                                                   IntegerType::getInt64Ty(CurrentModule->getContext()),
+                                                                                   IntegerType::getInt64Ty(CurrentModule->getContext())));
+
+        }
+
         // register all global variables
         for (auto i = M.global_begin(), e = M.global_end(); i != e; ++i) {
             Value* gv = &*i;
             TheState.RegisterVariable(gv);
+            TheState.Variables[gv].isGlobal=true;
             if (gv->getType()->isPointerTy()) {
                 TheState.SetSizeForPointerVariable(gv, getSizeForValue(gv));
             }
@@ -920,7 +997,6 @@ private:
         std::vector<Function*> FunctionsToAnalyze;
         for (auto i = M.begin(), e = M.end(); i != e; ++i) {
             Function* F = &*i;
-
             // skip declarations and nesCheckLib functions
             if (F->isDeclaration()) continue;
             StringRef fname = F->getName();
@@ -933,18 +1009,60 @@ private:
             isCurrentFunctionWhitelisted = isWhitelisted(F);
 
             // potentially rewrite signatures and relative CallSites for all functions that take or return pointers
-            Function* NF = rewriteFunctionSignature(F);
+            Function *NF = rewriteFunctionSignature(F);
             changed |= (F != NF);
-
             FunctionsToAnalyze.push_back(NF);
+
         }
+
         for (Function* F : FunctionsToAnalyze) {
             isCurrentFunctionWhitelisted = isWhitelisted(F);
             isCurrentFunctionWhitelistedForInstrumentation = isCurrentFunctionWhitelisted || isWhitelistedForInstrumentation(F);
-
             // analyze all functions and populate Instrumentation WorkList
             analyzeFunction(F);
         }
+
+        printStats();
+
+        bool isConverged=false;
+        std::set<StringRef> functionsToAnalyze;
+        Function* F=NULL;
+        errs()<<"\n\n\n\n*********** WORKLIST **************\n\n";
+        //Worklist algorithm - run until it converges
+        while(!isConverged) {
+            //Compute the functions that need to be analyzed
+            for (auto it = TheState.Variables.begin(); it != TheState.Variables.end(); it++) {
+                if (it->second.isGlobal && it->second.didClassificationChange) {
+                    //Analyze the dependent functions
+                    errs()<<"Dependent functions [ "<<it->first<<"] :";
+                    for(auto nameIt= it->second.dependentFunctions.begin();nameIt!=it->second.dependentFunctions.end();nameIt++)
+                    {
+                        functionsToAnalyze.insert(functionsToAnalyze.begin(),*nameIt);
+                        errs()<<(*nameIt)<<" ";
+                    }
+                    errs()<<"\n";
+                    it->second.didClassificationChange=false;
+                }
+            }
+
+
+            //Stop when you reach steady state
+            isConverged=functionsToAnalyze.empty();
+            for(auto nameIt=functionsToAnalyze.begin();nameIt!=functionsToAnalyze.end();nameIt++) {
+                //Analyze functions
+                    F=M.getFunction(*nameIt);
+                    if(F!=NULL) {
+                        isCurrentFunctionWhitelisted = isWhitelisted(F);
+                        isCurrentFunctionWhitelistedForInstrumentation =
+                                isCurrentFunctionWhitelisted || isWhitelistedForInstrumentation(F);
+                        // analyze all functions and populate Instrumentation WorkList
+                        analyzeFunction(F);
+                    }
+                }
+            functionsToAnalyze.clear();
+            }
+
+
 
         errs() << "\n\n*********\n REMOVING OLD FUNCTIONS\n";
         for (Function* F : FunctionsToRemove) {
@@ -972,7 +1090,6 @@ private:
 
         return changed;
     }
-
 
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {

@@ -8,6 +8,8 @@
 #include <sstream>
 #include <string>
 #include <set>
+#include <stdio.h>
+#include <stdlib.h>
 
 
 #define USE_COLORED_OUTPUT 1
@@ -61,6 +63,10 @@ namespace NesCheck {
 		bool hasExplicitSizeVariable;
 		bool instantiatedExplicitSizeVariable;
 		Value* explicitSizeVariable;
+		//Fix  - to address the worklist issue
+		bool isGlobal=false;
+		bool didClassificationChange=false;
+		std::set<StringRef> dependentFunctions;
 	} VariableInfo;
 
 
@@ -69,9 +75,9 @@ namespace NesCheck {
 	class AnalysisState {
 	private:
 		int numFunctions = 0;
-		std::map<VariableMapKeyType const *, VariableInfo> Variables;
 	public:
-		AnalysisState();
+        std::map<VariableMapKeyType const *, VariableInfo> Variables;
+        AnalysisState();
 		void SetSizeType(llvm::Type* st);
 		void RegisterFunction(Function *func);
 	    void RegisterVariable(const VariableMapKeyType *Decl);
@@ -90,3 +96,7 @@ namespace NesCheck {
 	};
 
 }
+
+
+
+
