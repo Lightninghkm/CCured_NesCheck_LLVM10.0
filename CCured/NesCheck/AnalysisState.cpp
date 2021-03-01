@@ -1,6 +1,6 @@
 #include "AnalysisState.hpp"
 
-namespace NesCheck {
+namespace NesCheck { 
 
 int _safeptrscount, _seqptrscount, _dynptrscount, _hasmetadatatableentrycount;
 llvm::Type* sizetype;

@@ -70,7 +70,7 @@ namespace NesCheck {
 	} VariableInfo;
 
 
-
+ 
 
 	class AnalysisState {
 	private:
