@@ -50,9 +50,12 @@ namespace NesCheck {
 	}
 
 	inline static std::string getIdentifyingName(const VariableMapKeyType *Decl) {
-	    char address[11];
-	    sprintf(address, "%p", (const void*) Decl);
-	    return Decl->getName().str() + "[" + address + "]";
+	    std::string addr;
+	    llvm::raw_string_ostream ss(addr);
+	    ss << (const void *)Decl;
+	    if (Decl != nullptr)
+	    	return Decl->getName().str() + "[" + ss.str() + "]";
+	    return "";
 	}
 
 

@@ -20,6 +20,7 @@ void AnalysisState::RegisterVariable(const VariableMapKeyType *Decl) {
 
     Variables[Decl].classification = VariableStates::Safe;
     Variables[Decl].size = llvm::ConstantInt::get(sizetype, 0);
+    //errs() << GREEN << "\t=>(Register) Classified " << " as SAFE" << NORMAL << "\n";
     errs() << GREEN << "\t=>(Register) Classified " << getIdentifyingName(Decl) << " as SAFE" << NORMAL << "\n";
 }
 void AnalysisState::ClassifyPointerVariable(const VariableMapKeyType* Decl, VariableStates ptrType) {
@@ -30,8 +31,10 @@ void AnalysisState::ClassifyPointerVariable(const VariableMapKeyType* Decl, Vari
         Variables[Decl].classification = ptrType;
         if(Variables[Decl].isGlobal)
             Variables[Decl].didClassificationChange = true;
+        //errs() << GREEN << "\t=> Classified " << " as " << PtrTypeToString(ptrType) << NORMAL << "\n";
         errs() << GREEN << "\t=> Classified " << getIdentifyingName(Decl) << " as " << PtrTypeToString(ptrType) << NORMAL << "\n";
     } else {
+        //errs() << GRAY << "\t=> Ignored classification of " << " as " << PtrTypeToString(ptrType) << NORMAL << "\n";
         errs() << GRAY << "\t=> Ignored classification of " << getIdentifyingName(Decl) << " as " << PtrTypeToString(ptrType) << NORMAL << "\n";
     }
 }
@@ -44,6 +47,7 @@ VariableInfo * AnalysisState::SetSizeForPointerVariable(const VariableMapKeyType
         // Variables[Decl].hasSize = true;
         Variables[Decl].size = size;
     }
+    //errs() << GREEN << "\t=> Size of " << " set to " << *(Variables[Decl].size) << NORMAL << "\n";
     errs() << GREEN << "\t=> Size of " << getIdentifyingName(Decl) << " set to " << *(Variables[Decl].size) << NORMAL << "\n";
     return &(Variables[Decl]);
 }
@@ -51,6 +55,7 @@ void AnalysisState::SetExplicitSizeVariableForPointerVariable(const VariableMapK
     RegisterVariable(Decl);
     Variables[Decl].hasExplicitSizeVariable = (explicitSize != NULL);
     Variables[Decl].explicitSizeVariable = explicitSize;
+    //errs() << GREEN << "\t=> Explicit size variable for " << " set to " << *(Variables[Decl].explicitSizeVariable) << NORMAL << "\n";
     errs() << GREEN << "\t=> Explicit size variable for " << getIdentifyingName(Decl) << " set to " << *(Variables[Decl].explicitSizeVariable) << NORMAL << "\n";
 }
 
@@ -67,6 +72,7 @@ void AnalysisState::SetHasMetadataTableEntry(const VariableMapKeyType *Ref) {
 
 VariableInfo * AnalysisState::GetPointerVariableInfo(VariableMapKeyType *Decl) {
     errs() << GRAY << "\tGetting VarInfo for " << getIdentifyingName(Decl) << "... ";
+    //errs() << GRAY << "\tGetting VarInfo for " << "... ";
     if (isa<ConstantPointerNull>(Decl)) {
         errs() << "ConstantPointer NULL type creating new temp variable info.\n" << NORMAL;
         VariableInfo* info = new VariableInfo;
