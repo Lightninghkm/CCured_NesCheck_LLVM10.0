@@ -1201,69 +1201,69 @@ namespace
           //Scan all the functions that need to be analyzed  
           for (auto nameIt = functionsToAnalyze.begin(); nameIt != functionsToAnalyze.end(); nameIt++)
           {
-          	F = M.getFunction(*nameIt);
-          	if (F != NULL)
-          	{
-          		//Discard if whitelisted
-            	isCurrentFunctionWhitelisted = isWhitelisted(F);
-            	isCurrentFunctionWhitelistedForInstrumentation = isCurrentFunctionWhitelisted || isWhitelistedForInstrumentation(F);
+            F = M.getFunction(*nameIt);
+            if (F != NULL)
+            {
+              //Discard if whitelisted
+              isCurrentFunctionWhitelisted = isWhitelisted(F);
+              isCurrentFunctionWhitelistedForInstrumentation = isCurrentFunctionWhitelisted || isWhitelistedForInstrumentation(F);
             	
-          		//Iterate all instruction in the being analyzed function
-            	for (inst_iterator i = inst_begin(*F), e = inst_end(*F); i != e; ++i)
-            	{
-            		//Scan the operand of the instruction and get its use
-            		for (Use &U : (&*i)->operands())
-            		{
-            			//If the instruction's operand is a Global variable
-            			//And if the Global variable is exactly the one whose classification changed
-            			//We need to analyze all the alias and propagate the classification inside the function
-            			if (it->first == dyn_cast<GlobalVariable>(U))
-            			{	
-            				//Iterate the instructions inside the function again to analyze alias
-            				for (inst_iterator inst = inst_begin(*F), e = inst_end(*F); inst != e; ++inst)
-            				{ 
-            					if (&*i == &*inst)
-            						continue;
+              //Iterate all instruction in the being analyzed function
+              for (inst_iterator i = inst_begin(*F), e = inst_end(*F); i != e; ++i)
+              {
+                //Scan the operand of the instruction and get its use
+                for (Use &U : (&*i)->operands())
+                {
+                  //If the instruction's operand is a Global variable
+                  //And if the Global variable is exactly the one whose classification changed
+                  //We need to analyze all the alias and propagate the classification inside the function
+                  if (it->first == dyn_cast<GlobalVariable>(U))
+                  {	
+                    //Iterate the instructions inside the function again to analyze alias
+                    for (inst_iterator inst = inst_begin(*F), e = inst_end(*F); inst != e; ++inst)
+            	    { 
+                      if (&*i == &*inst)
+                        continue;
             					
-            					Instruction *InstGlobalOperand = &*i;
-            					Instruction *InstReAnalyze = &*inst;
+                      Instruction *InstGlobalOperand = &*i;
+                      Instruction *InstReAnalyze = &*inst;
             					
-            					//Using SVF to analyse aliasing
-            					//If the instruction does not have a value node in the value-flow graph constructed by SVF
-            					//We cannot get alias information for those and SVF will halt the analysis
-            					//Prevent this scenario from happening
-            					if (!(ptaw._ander_pta->getPAG()->hasValueNode(InstGlobalOperand)) || !(ptaw._ander_pta->getPAG()->hasValueNode(InstReAnalyze)))
-            						continue;
+                      //Using SVF to analyse aliasing
+                      //If the instruction does not have a value node in the value-flow graph constructed by SVF
+                      //We cannot get alias information for those and SVF will halt the analysis
+                      //Prevent this scenario from happening
+                      if (!(ptaw._ander_pta->getPAG()->hasValueNode(InstGlobalOperand)) || !(ptaw._ander_pta->getPAG()->hasValueNode(InstReAnalyze)))
+                        continue;
             						
-            					//Get aliasing information
-            					auto aliasResult = ptaw.queryAlias(*InstGlobalOperand, *InstReAnalyze);
+                      //Get aliasing information
+                      auto aliasResult = ptaw.queryAlias(*InstGlobalOperand, *InstReAnalyze);
             					
-            					if (aliasResult != NoAlias)
-            					{
-            						//Analyze the instructions and propagate classifications
-            						//For those instructions that alias the instruction that causes the global classification change
-            						Builder->SetInsertPoint(InstReAnalyze);
-            						processInstruction(InstReAnalyze);
-											}
-										}
-									}
-								}
-							}
-          	}
+                      if (aliasResult != NoAlias)
+                      {
+                        //Analyze the instructions and propagate classifications
+                        //For those instructions that alias the instruction that causes the global classification change
+                        Builder->SetInsertPoint(InstReAnalyze);
+                        processInstruction(InstReAnalyze);
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
           //Clear the cache
-        	functionsToAnalyze.clear();
+          functionsToAnalyze.clear();
         	
-				}
-			}
+        }
+      }
 			
-			/*
-			//Worklist Algorithm - opted out
-			//Use only if you have globals that you want to analyze
-			//And those globals do not have value node in SVF
-			//Otherwise the classification propagation algorithm can handle them
+      /*
+      //Worklist Algorithm - opted out
+      //Use only if you have globals that you want to analyze
+      //And those globals do not have value node in SVF
+      //Otherwise the classification propagation algorithm can handle them
 			
-			bool isConverged = false;
+      bool isConverged = false;
       std::set<StringRef> functionsToAnalyze;
       Function *F = NULL;
       errs() << "\n\n\n\n*********** WORKLIST **************\n\n";
