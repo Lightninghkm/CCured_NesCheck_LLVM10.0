@@ -71,6 +71,8 @@ Link ```neschecklib.bc``` with the bitcode you want to analyze ```target.bc```:
 ./llvm-project-llvmorg-10.0.0/build/bin/llvm-link neschecklib.bc target.bc -o target.linked.bc
 ```
 
+In case you need help with building whole-program (or whole-library) LLVM bitcode files from an unmodified C or C++ source package, please see [wllvm](https://github.com/travitch/whole-program-llvm).
+
 It's time to run the analysis:
 ```bash
 ./llvm-project-llvmorg-10.0.0/build/bin/opt -o target.opt.bc -load llvm-project-llvmorg-10.0.0/build/lib/libNesCheck.so -nescheck -stats -time-passes < target.linked.bc > target.nescheckout
