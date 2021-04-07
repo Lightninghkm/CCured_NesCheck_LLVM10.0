@@ -16,7 +16,7 @@ set_target_properties(NesCheck PROPERTIES
   COMPILE_FLAGS "-fno-rtti"
 )
 
-include_directories("/home/tianrou/Desktop/SVF/include")
+include_directories("/Where/Is/Your/SVF/include")
 
-target_link_libraries(NesCheck PUBLIC "/home/tianrou/Desktop/SVF/Release-build/lib/libSvf.a")
+target_link_libraries(NesCheck PUBLIC "/Where/Is/Your/SVF/Release-build/lib/libSvf.a")
 
