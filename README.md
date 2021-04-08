@@ -1,4 +1,4 @@
-# CCured_NesCheck_LLVM10
+# NesCheck on LLVM 10.0.0
 For information of NesCheck, see the paper in [AsiaCCS 2017](https://hexhive.epfl.ch/publications/files/17AsiaCCS2.pdf)
 
 To put is simple, NesCheck analyzes and classifies pointers in terms of memory safety related operations (e.g., pointer arithmetic, type cast), the classification scheme is similar to [CCured](https://people.eecs.berkeley.edu/~necula/Papers/ccured_popl02.pdf).
@@ -61,7 +61,7 @@ make NesCheck
 ```
 
 ## Usage
-Generate bitcode for the neschecklib.c in the repo:
+Generate bitcode for ```neschecklib.c``` in the repo:
 ```bash
 ./llvm-project-llvmorg-10.0.0/build/bin/clang-10 -O0 -g -emit-llvm neschecklib.c -c -o neschecklib.bc
 ```
