@@ -16,7 +16,3 @@ AliasResult alias::PTAWrapper::queryAlias(Value &v1, Value &v2)
   assert(_ander_pta != nullptr && "cannot obtain ander pointer analysis!\n");
   return _ander_pta->alias(&v1, &v2);
 }
-  //PAG* alias::PTAWrapper::getPAG() override
-	//{
-	//	return pag;
-	//}
