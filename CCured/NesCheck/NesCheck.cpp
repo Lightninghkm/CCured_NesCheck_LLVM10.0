@@ -503,16 +503,33 @@ namespace
           if (II->getType()->isPointerTy())
             TheState.SetSizeForPointerVariable(II, getSizeForValue(II));
         }
-
         // check if this instruction calls a function that has been rewritten and update it
         if (II->getCalledFunction() != NULL)
         {
-          StringRef fname = II->getCalledFunction()->getName();
-          if (CONTAINS(FunctionsToRemove, II->getCalledFunction()) && (fname.endswith("_nesCheck")))
+          //StringRef fname = II->getCalledFunction()->getName();
+          //if (CONTAINS(FunctionsToRemove, II->getCalledFunction()) && (fname.endswith("_nesCheck")))
+          if (CONTAINS(FunctionsToRemove, II->getCalledFunction()))
           {
             errs() << "Call needs rewriting!\n";
             rewriteCallSite(II);
           }
+          /*
+          //Function *Caller = CurrentModule->getFunction((II->getCalledFunction()->getName() + "_nesCheck").str());
+          Function *CallerTemp = II->getCalledFunction();
+          std::string CallerName = (CallerTemp->getName().str() + "_nesCheck");
+          Function *Caller = CurrentModule->getFunction(CallerName);
+          NesCheck::VariableInfo *varinfo;
+          errs() << CallerName << "\n";
+          for (inst_iterator i = inst_begin(*Caller), e = inst_end(*Caller); i != e; ++i){
+            errs() << "Propagating return type!\n";
+            Instruction *I = &*i;
+            if (ReturnInst *RI = dyn_cast_or_null<ReturnInst>(I)){
+              errs() << "Propagating return type!\n";
+              if((!(varinfo = TheState.GetPointerVariableInfo(RI->getOperand(0)))))
+                TheState.ClassifyPointerVariable(II, varinfo->classification);
+            }
+          }
+          */
         }
       }
 
@@ -678,9 +695,9 @@ namespace
         if (II->getResultElementType()->isPointerTy())
         {
           // this GEP needs metadata
-          //Value* valoperand = II->getPointerOperand();
-          //NesCheck::VariableInfo* varinfo = TheState.GetPointerVariableInfo(valoperand);
-          //setMetadataTableEntry(II->getPointerOperand(), varinfo->size, I);
+          Value* valoperand = II->getPointerOperand();
+          NesCheck::VariableInfo* varinfo = TheState.GetPointerVariableInfo(valoperand);
+          setMetadataTableEntry(II->getPointerOperand(), varinfo->size, I);
           lookupMetadataTableEntry(II, I);
         }
         else
@@ -718,11 +735,11 @@ namespace
         if (srcT->isPointerTy())
         {
           NesCheck::VariableInfo *varinfo = TheState.GetPointerVariableInfo(II->getOperand(0));
-          Type *innerSrcT = unwrapPointer(srcT);
-          Type *innerDstT = unwrapPointer(dstT);
-          if (countIndirections(srcT) != countIndirections(dstT) ||
-              innerSrcT->isIntegerTy() != innerDstT->isIntegerTy())
-          {
+          //Type *innerSrcT = unwrapPointer(srcT);
+          //Type *innerDstT = unwrapPointer(dstT);
+          //if (countIndirections(srcT) != countIndirections(dstT) ||
+              //innerSrcT->isIntegerTy() != innerDstT->isIntegerTy())
+          //{
             if (LoadInst *III = dyn_cast_or_null<LoadInst>(II->getOperand(0)))
               TheState.ClassifyPointerVariable(III->getPointerOperand(), NesCheck::VariableStates::Dyn);
             else if (isa<CallInst>(II->getOperand(0)))
@@ -734,7 +751,7 @@ namespace
             }
             else
               errs() << "=> Ignored classification of variable since we have no operand\n";
-          }
+          //}
 
           // propagate size metadata
           if (varinfo != 0x0)
@@ -782,6 +799,10 @@ namespace
       for (unsigned i = 0, e = FTy->getNumParams(); i != e; ++i, ++AI)
       {
         Value *varr = AI->get();
+        if (!(TheState.GetPointerVariableInfo(varr))){
+          errs() << "Rewriting Call Fails Due to Missing VarInfo" << "\n";
+          return false;
+        }
         errs() << "Arg: " << *varr << "\n";
 
         if (needsRewritten(varr->getType()))
@@ -812,16 +833,19 @@ namespace
       llvm::Instruction *Before = Call;
       Function *NF = CurrentModule->getFunction((calledF->getName() + "_nesCheck").str());
       if (llvm::InvokeInst *II = llvm::dyn_cast<llvm::InvokeInst>(Call))
-      {
+      { 
         NewCall = llvm::InvokeInst::Create(NF, II->getNormalDest(), II->getUnwindDest(), Args, "", Before);
         llvm::cast<llvm::InvokeInst>(NewCall)->setCallingConv(II->getCallingConv());
       }
       else
       {
-        NewCall = llvm::CallInst::Create(NF, Args, "", Before);
-        llvm::cast<llvm::CallInst>(NewCall)->setCallingConv(((CallInst *)Call)->getCallingConv());
-        if (llvm::cast<llvm::CallInst>(Call)->isTailCall())
-          llvm::cast<llvm::CallInst>(NewCall)->setTailCall();
+        //FunctionType *FTy = NF->getFunctionType();
+      	//if((Args.size() == FTy->getNumParams() || (FTy->isVarArg() && Args.size() > FTy->getNumParams()))){
+          NewCall = llvm::CallInst::Create(NF, Args, "", Before);
+          llvm::cast<llvm::CallInst>(NewCall)->setCallingConv(((CallInst *)Call)->getCallingConv());
+          if (llvm::cast<llvm::CallInst>(Call)->isTailCall())
+            llvm::cast<llvm::CallInst>(NewCall)->setTailCall();
+        //}
       }
 
       if (Call->getType() != Type::getVoidTy(Call->getParent()->getContext()))
@@ -862,7 +886,7 @@ namespace
       StringRef fname = F->getName();
       // Whitelist all functions that are only necessary for TOSSIM simulation.
       if (fname.startswith("sim_") || fname.startswith("heap") || fname.endswith("heap") ||
-          fname.startswith("hashtable_") || fname.endswith("_hashtable"))
+          fname.startswith("hashtable_") || fname.endswith("_hashtable") || fname.startswith("llvm.dbg") )
         return true;
 
       return false;
