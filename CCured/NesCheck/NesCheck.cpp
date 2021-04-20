@@ -697,7 +697,9 @@ namespace
           // this GEP needs metadata
           Value* valoperand = II->getPointerOperand();
           NesCheck::VariableInfo* varinfo = TheState.GetPointerVariableInfo(valoperand);
-          setMetadataTableEntry(II->getPointerOperand(), varinfo->size, I);
+          if (varinfo != 0x0){
+            setMetadataTableEntry(II->getPointerOperand(), varinfo->size, I);
+          }
           lookupMetadataTableEntry(II, I);
         }
         else
