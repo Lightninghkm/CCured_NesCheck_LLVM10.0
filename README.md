@@ -67,7 +67,6 @@ opt-10 -o target.opt.bc -load libNesCheck.so -nescheck -stats -time-passes < tar
 
 After CCured analysis, you will get a bunch of pointers that are unsafe in terms of DataGuard's first stage analysis.
 
-Note: This pass includes the taint analysis on detecting instructions that related to unsafe objects/pointers, which is still under-construction. If you face difficulties on running the analysis in a reasonable amount of time, please comment the related code in function ```identifyDifferentKindsOfUnsafePointers``` and use SVF for query aliasing instead of PDG.
 
 
 
